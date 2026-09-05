@@ -48,7 +48,8 @@ load_dotenv()
 
 CHROMA_DIR = "./chroma_store"
 COLLECTION_NAME = "india_jobs"
-EMBED_MODEL = "all-MiniLM-L6-v2"
+# Embedding model is now fixed by chromadb's DefaultEmbeddingFunction
+# (bundled all-MiniLM-L6-v2 ONNX build) — see _embed_fn below.
 
 # ---------- Chroma store bootstrap (auto-download from Google Drive) ----------
 
@@ -124,7 +125,12 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")  # good general-purpose instruct model
 
 _client = chromadb.PersistentClient(path=CHROMA_DIR)
-_embed_fn = embedding_functions.SentenceTransformerEmbeddingFunction(model_name=EMBED_MODEL)
+# DefaultEmbeddingFunction runs the same all-MiniLM-L6-v2 model as
+# SentenceTransformerEmbeddingFunction did, but as a bundled ONNX model via
+# onnxruntime instead of pulling in torch + sentence-transformers. Much
+# smaller install (~100MB vs 1GB+), no HF Hub download, same embedding
+# space as the store was originally built with.
+_embed_fn = embedding_functions.DefaultEmbeddingFunction()
 _collection = _client.get_collection(name=COLLECTION_NAME, embedding_function=_embed_fn)
 
 
