@@ -20,6 +20,11 @@ What's new in this version, layered on top of retrieval:
     aggregate), so the caller can see which specific job wants what.
   - AI-suggested courses to close each missing skill.
   - A personalized, AI-generated step-by-step plan toward the target role.
+  - ensure_chroma_store(): if CHROMA_DIR isn't present locally (e.g. a
+    fresh clone/environment), this downloads it from the shared Google
+    Drive folder via `gdown` before the Chroma client tries to open it,
+    instead of failing with "collection not found". No-op if the store is
+    already on disk.
 
 NOT RUN IN THIS SANDBOX (depends on the existing Chroma store + a Groq API
 key). Written against the real schema from 01/02 and the documented Groq
@@ -28,6 +33,8 @@ HTTP API — run in your own environment.
 Setup:
     1. Get a free API key: https://console.groq.com
     2. export GROQ_API_KEY=your_key_here
+    3. (only if chroma_store/ isn't already present locally)
+       pip install gdown
 
 Run (CLI test):
     python rag_pipeline.py
@@ -52,6 +59,13 @@ CHROMA_DIR = "./chroma_store"
 COLLECTION_NAME = "india_jobs"
 EMBED_MODEL = "all-MiniLM-L6-v2"
 
+# Shared Google Drive folder containing a pre-built chroma_store, for
+# environments that don't already have it on disk (fresh clone, new
+# machine, CI, etc). Only used as a fallback — see ensure_chroma_store().
+CHROMA_STORE_DRIVE_FOLDER_URL = (
+    "https://drive.google.com/drive/folders/1EOJHVBLEcBZH3JLBoOd7D2WNnrJ9Cwtg?usp=drive_link"
+)
+
 # ---------- Experience metadata ----------
 # Unchanged from the working retrieval setup — these already match the
 # metadata schema of the existing Chroma store. EDIT THESE TWO only if you
@@ -71,6 +85,74 @@ FRESHER_EXPERIENCE_VALUES = ["0-1", "0-2"]  # values that count as entry-level
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")  # good general-purpose instruct model
+
+
+def ensure_chroma_store(
+    chroma_dir: str = CHROMA_DIR,
+    drive_folder_url: str = CHROMA_STORE_DRIVE_FOLDER_URL,
+) -> None:
+    """Make sure `chroma_dir` exists and is populated before anything tries
+    to open it as a PersistentClient.
+
+    If the directory is missing or empty, download it from the shared
+    Google Drive folder using `gdown` (the standard tool for scripted
+    Drive downloads — a plain `requests.get` on a Drive share link returns
+    an HTML interstitial page, not the file/folder contents).
+
+    Safe to call unconditionally at import/startup time: if the store is
+    already present (the common case after the first run, or in an
+    environment that already has it baked in), this is a no-op and does
+    not touch the network.
+    """
+    if os.path.isdir(chroma_dir) and os.listdir(chroma_dir):
+        return
+
+    try:
+        import gdown
+    except ImportError as e:
+        raise RuntimeError(
+            f"'{chroma_dir}' was not found locally and the 'gdown' package "
+            "isn't installed, so it can't be auto-downloaded.\n"
+            "Fix with one of:\n"
+            "  1. pip install gdown   (then just re-run this script)\n"
+            "  2. Manually download the folder from:\n"
+            f"     {drive_folder_url}\n"
+            f"     and place its contents at: {os.path.abspath(chroma_dir)}"
+        ) from e
+
+    print(f"[rag_pipeline] '{chroma_dir}' not found locally — downloading from Google Drive...")
+    os.makedirs(chroma_dir, exist_ok=True)
+    try:
+        gdown.download_folder(
+            url=drive_folder_url,
+            output=chroma_dir,
+            quiet=False,
+            use_cookies=False,
+        )
+    except Exception as e:
+        raise RuntimeError(
+            "Automatic download of chroma_store from Google Drive failed "
+            f"({e}). This is usually a Drive rate limit or permissions "
+            "issue on large/shared folders. Download it manually from:\n"
+            f"  {drive_folder_url}\n"
+            f"and place its contents at: {os.path.abspath(chroma_dir)}"
+        ) from e
+
+    if not os.listdir(chroma_dir):
+        raise RuntimeError(
+            f"Download from Google Drive completed but '{chroma_dir}' is "
+            "still empty — check the folder link is shared as "
+            "'Anyone with the link' and try again, or download it manually."
+        )
+
+    print(f"[rag_pipeline] chroma_store downloaded to '{chroma_dir}'.")
+
+
+# Run the check once at import time, before the Chroma client below tries
+# to open CHROMA_DIR. Both the CLI (`python rag_pipeline.py`) and app.py
+# (`import rag_pipeline as rag`) go through this same import, so neither
+# needs to remember to call it separately.
+ensure_chroma_store()
 
 _client = chromadb.PersistentClient(path=CHROMA_DIR)
 _embed_fn = embedding_functions.SentenceTransformerEmbeddingFunction(model_name=EMBED_MODEL)
