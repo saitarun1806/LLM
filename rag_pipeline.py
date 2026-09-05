@@ -154,7 +154,14 @@ def ensure_chroma_store(
 # needs to remember to call it separately.
 ensure_chroma_store()
 
-_client = chromadb.PersistentClient(path=CHROMA_DIR)
+# anonymized_telemetry=False silences a known, harmless ChromaDB/posthog
+# version-mismatch bug ("capture() takes 1 positional argument but 3 were
+# given") that otherwise logs a failed-telemetry line on every startup.
+# It has no effect on retrieval/embeddings — purely cosmetic in the logs.
+_client = chromadb.PersistentClient(
+    path=CHROMA_DIR,
+    settings=chromadb.Settings(anonymized_telemetry=False),
+)
 _embed_fn = embedding_functions.SentenceTransformerEmbeddingFunction(model_name=EMBED_MODEL)
 _collection = _client.get_collection(name=COLLECTION_NAME, embedding_function=_embed_fn)
 
