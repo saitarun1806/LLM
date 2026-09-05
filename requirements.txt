@@ -1,6 +1,26 @@
-fastapi
-uvicorn
-requests
-chromadb
-python-dotenv
-gdown
+# --- CPU-only PyTorch ---
+# sentence-transformers depends on torch, and the default PyPI wheel pulls
+# in full CUDA support (~2-3 GB download) even though this pipeline only
+# does CPU embedding inference. The line below adds PyTorch's CPU-only
+# wheel index as an EXTRA index (PyPI is still searched for every other
+# package) and pins torch to a "+cpu" build tag, which only exists on that
+# index — so pip resolves torch from there instead of pulling the full
+# CUDA build from PyPI. Net result: a single `pip install -r
+# requirements.txt` with no separate install step, ~150-200 MB instead of
+# ~2-3 GB for torch.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.4.1+cpu
+
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+pydantic==2.9.2
+requests==2.32.3
+python-dotenv==1.0.1
+
+chromadb==0.5.5
+sentence-transformers==3.1.1
+
+# Only needed for the Google Drive auto-download fallback in
+# rag_pipeline.py's ensure_chroma_store() — skip this if chroma_store/ is
+# already present locally and you never expect to need the fallback.
+gdown==5.2.0
